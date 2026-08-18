@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (C) Arduino s.r.l. and/or its affiliated companies
+//
 // SPDX-License-Identifier: MPL-2.0
 
 const socket = io(`http://${window.location.host}`);
 
-let thinkingMessageElement = null;
+let thinkingMessageElement = null; // To keep track of the thinking message element
 let sendButton;
 let sendButtonImg;
 let quickActionButtonsContainer;
 let customPlaceholder;
-let lastUserPrompt = '';
+let lastUserPrompt = ''; // To store the last user prompt
 
 function showError(message) {
     console.log(message);
@@ -37,6 +38,7 @@ function removeThinkingMessage() {
 function handleResponse(data) {
     const ai_msg = document.getElementById('active-ai-response');
     if (thinkingMessageElement) {
+        // First chunk of stream
         const textContent = thinkingMessageElement.querySelector('.text-content');
         if (textContent) {
             textContent.innerHTML = '';
@@ -56,8 +58,8 @@ function handleResponse(data) {
 }
 
 function handleStreamEnd() {
-    removeThinkingMessage();
-    const ai_msg = document.getElementById('active-ai-response');
+    removeThinkingMessage(); // Ensure it's removed if stream ends
+    ai_msg = document.getElementById('active-ai-response');
     if (ai_msg) {
         ai_msg.id = '';
     }
@@ -67,97 +69,139 @@ function handleStreamEnd() {
             sendButtonImg.src = 'img/send.svg';
         }
     }
-    updateSendButtonState();
-    updateClearChatButtonState();
+    updateSendButtonState(); // Update button state after stream ends
+    updateClearChatButtonState(); // Update clear chat button state after stream ends
 }
 
-function autoExpandInput(element) {
-    element.style.height = 'auto';
-    element.style.height = (element.scrollHeight) + 'px';
-}
+function handleCompletedCommand(data) {
+    console.log(`Command completed: ${data.command}`);
+    const userInput = document.getElementById('user-input'); // Get it once
 
-function updatePlaceholderVisibility() {
-    const userInput = document.getElementById('user-input');
-    if (userInput && customPlaceholder) {
-        customPlaceholder.style.display = userInput.value ? 'none' : 'block';
+    if (data.command === 'stop_stream'){
+        handleStreamEnd();
+        const disclaimer = document.createElement('div');
+        disclaimer.className = 'stop-disclaimer';
+        disclaimer.textContent = 'You stopped this response';
+        document.getElementById('messages').appendChild(disclaimer);
+
+        if (userInput) {
+            userInput.value = lastUserPrompt;
+            autoExpandInput(userInput);
+            updateSendButtonState();
+            updatePlaceholderVisibility();
+            userInput.focus();
+        }
+    } else if (data.command === 'clear_chat') {
+        document.getElementById('messages').innerHTML = '';
+        document.getElementById('empty-chat-container').style.display = 'flex';
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+            mainContent.classList.remove('chat-active');
+        }
+        if (userInput) {
+            userInput.value = '';
+            userInput.style.height = '32px';
+        }
+        if (quickActionButtonsContainer) {
+            quickActionButtonsContainer.style.display = 'none'; // Hide quick action buttons
+        }
+        lastUserPrompt = '';
+        updateSendButtonState();
+        updateClearChatButtonState();
+        updatePlaceholderVisibility();
+        if (userInput) {
+            userInput.focus();
+        }
     }
+}
+
+function handleCommandError(data) {
+    const message = `Command error: ${data.command} - ${data.error}`;
+    showError(message);
+}
+
+function sendClearChatCommand() {
+    socket.emit('commands', { command: 'clear_chat' });
+}
+
+
+
+function handleLLMError(data) {
+    const message = `LLM error: ${data.error}`;
+    showError(message);
+    removeThinkingMessage(); // Ensure it's removed if an error occurs
+    if (quickActionButtonsContainer) {
+        quickActionButtonsContainer.style.display = 'none'; // Hide quick action buttons
+    }
+    handleStreamEnd();
+}
+
+function initSocketIO() {
+    socket.on('response', handleResponse);
+    socket.on('stream_end', handleStreamEnd);
+    socket.on('llm_error', handleLLMError);
+    socket.on('command_ok', handleCompletedCommand);
+    socket.on('command_error', handleCommandError);
+
+    socket.on('connect', () => {
+        console.log("Connected to backend");
+    });
+
+    socket.on('disconnect', () => {
+        showError("Connection to backend lost. Please refresh the page or check the backend server.");
+    });
+}
+
+function autoExpandInput(field) {
+    field.style.height = 'auto';
+    field.style.height = field.scrollHeight + 'px';
 }
 
 function updateSendButtonState() {
     const userInput = document.getElementById('user-input');
-    if (sendButton && userInput) {
-        if (userInput.value.trim() !== '') {
-            sendButton.classList.add('active');
+    if (userInput && sendButton) {
+        if (sendButton.classList.contains('sending-state')) {
+            sendButton.classList.remove('disabled');
             sendButton.removeAttribute('disabled');
+            return;
+        }
+
+        if (userInput.value.trim() === '') {
+            sendButton.classList.add('disabled');
+            sendButton.setAttribute('disabled', 'disabled');
         } else {
-            sendButton.classList.remove('active');
-            sendButton.setAttribute('disabled', 'true');
+            sendButton.classList.remove('disabled');
+            sendButton.removeAttribute('disabled');
         }
     }
 }
 
 function updateClearChatButtonState() {
+    const messagesContainer = document.getElementById('messages');
     const clearChatButton = document.getElementById('clear-chat-button-header');
-    const chatMessagesContainer = document.getElementById('chat-messages-container');
-    if (clearChatButton && chatMessagesContainer) {
-        if (chatMessagesContainer.children.length > 0 && !document.getElementById('empty-chat-container')) {
-            clearChatButton.classList.remove('disabled');
-        } else {
+    if (messagesContainer && clearChatButton) {
+        if (messagesContainer.children.length === 0) {
             clearChatButton.classList.add('disabled');
+            clearChatButton.setAttribute('disabled', 'disabled');
+        } else {
+            clearChatButton.classList.remove('disabled');
+            clearChatButton.removeAttribute('disabled');
         }
     }
 }
 
-function appendMessage(sender, message) {
-    const chatMessagesContainer = document.getElementById('chat-messages-container');
-    const emptyChatContainer = document.getElementById('empty-chat-container');
-
-    if (emptyChatContainer) {
-        emptyChatContainer.remove();
-    }
-
-    const messageElement = document.createElement('div');
-    messageElement.classList.add('chat-message', `${sender}-message`);
-
-    const textElement = document.createElement('div');
-    textElement.classList.add('text-content');
-
-    if (sender === 'user') {
-        textElement.textContent = message;
-        messageElement.appendChild(textElement);
-    } else {
-        messageElement.id = 'active-ai-response';
-        messageElement.dataset.rawText = '';
-        messageElement.appendChild(textElement);
-    }
-
-    chatMessagesContainer.appendChild(messageElement);
-    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
-    return messageElement;
-}
-
-function sendMessage(prompt) {
-    if (!prompt || prompt.trim() === '') return;
-
+function sendMessage(text) {
     hideError();
-    appendMessage('user', prompt);
-
-    thinkingMessageElement = appendMessage('ai', '');
-    thinkingMessageElement.classList.add('thinking-message');
-    const textContent = thinkingMessageElement.querySelector('.text-content');
-    if (textContent) {
-        textContent.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+    document.getElementById('empty-chat-container').style.display = 'none';
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) {
+        mainContent.classList.add('chat-active');
     }
-
-    socket.emit('prompt', { prompt: prompt });
-
     const userInput = document.getElementById('user-input');
-    if (userInput) {
-        userInput.value = '';
-        userInput.style.height = 'auto';
-        updatePlaceholderVisibility();
-        updateSendButtonState();
+    if (!text) {
+        text = userInput.value;
     }
+    lastUserPrompt = text; // Store the prompt
 
     if (sendButton) {
         sendButton.classList.add('sending-state');
@@ -165,76 +209,128 @@ function sendMessage(prompt) {
             sendButtonImg.src = 'img/stop.svg';
         }
     }
-}
 
-function sendClearChatCommand() {
-    socket.emit('commands', { command: 'clear_chat' });
-}
+    userInput.value = '';
+    userInput.style.height = '32px';
+    updateSendButtonState();
+    updatePlaceholderVisibility();
 
-function sendStopStreamCommand() {
-    socket.emit('commands', { command: 'stop_stream' });
-}
-
-socket.on('response', handleResponse);
-socket.on('stream_end', handleStreamEnd);
-
-socket.on('llm_error', (data) => {
-    removeThinkingMessage();
-    showError(`LLM error: ${data.error}`);
-    handleStreamEnd();
-});
-
-socket.on('command_ok', (data) => {
-    if (data.command === 'clear_chat') {
-        const chatMessagesContainer = document.getElementById('chat-messages-container');
-        chatMessagesContainer.innerHTML = `
-            <div id=\"empty-chat-container\">
-                <div class=\"icon-and-greeting\">
-                    <img src=\"img/green-stars.svg\" alt=\"Green Stars\" />
-                    <p class=\"greeting\">Good morning</p>
-                    <p class=\"prompt-question\">What can I help you with today?</p>
-                </div>
-            </div>`;
-        updateClearChatButtonState();
+    if (quickActionButtonsContainer) {
+        quickActionButtonsContainer.style.display = 'flex';
     }
-});
+
+    const userMessageDiv = document.createElement('div');
+    userMessageDiv.className = 'user-message';
+    userMessageDiv.textContent = text;
+    document.getElementById('messages').appendChild(userMessageDiv);
+
+    thinkingMessageElement = document.createElement('div');
+    thinkingMessageElement.className = 'ai-response thinking-message';
+    thinkingMessageElement.id = 'active-ai-response';
+
+    const icon = document.createElement('img');
+    icon.src = 'img/sparkle.svg';
+    icon.className = 'ai-icon';
+    thinkingMessageElement.appendChild(icon);
+
+    const textContent = document.createElement('div');
+    textContent.className = 'text-content';
+    textContent.innerHTML = '<span class="circular-loader"></span>Thinking<span class="dot-1">.</span><span class="dot-2">.</span><span class="dot-3">.</span>';
+    thinkingMessageElement.appendChild(textContent);
+
+    document.getElementById('messages').appendChild(thinkingMessageElement);
+
+    socket.emit('prompt', { prompt: text });
+    updateClearChatButtonState();
+    document.getElementById('user-input').focus();
+}
+
+function updatePlaceholderVisibility() {
+    const userInput = document.getElementById('user-input');
+    if (customPlaceholder) {
+        if (userInput.value.trim() === '') {
+            customPlaceholder.style.display = 'flex';
+        } else {
+            customPlaceholder.style.display = 'none';
+        }
+    }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
+    initSocketIO();
+
     const userInput = document.getElementById('user-input');
     sendButton = document.getElementById('send-button');
     sendButtonImg = sendButton ? sendButton.querySelector('img') : null;
-    customPlaceholder = document.querySelector('.custom-placeholder');
     quickActionButtonsContainer = document.getElementById('quick-action-buttons');
+    customPlaceholder = document.querySelector('.custom-placeholder');
     const clearChatButton = document.getElementById('clear-chat-button-header');
 
-    if (userInput) {
-        userInput.addEventListener('input', () => {
-            autoExpandInput(userInput);
-            updatePlaceholderVisibility();
-            updateSendButtonState();
-        });
+    // Initial state
+    updateSendButtonState();
+    updateClearChatButtonState();
+    updatePlaceholderVisibility();
+    userInput.focus(); // Set initial focus
 
-        userInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (sendButton && !sendButton.disabled && !sendButton.classList.contains('sending-state')) {
-                    sendMessage(userInput.value);
-                }
+    // Listen for input changes
+    userInput.addEventListener('input', () => {
+        autoExpandInput(userInput);
+        updateSendButtonState();
+        updatePlaceholderVisibility();
+    });
+
+    // Listen for Enter key press in the input field
+    userInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            // Ensure the send button is not disabled before sending
+            if (!sendButton.classList.contains('disabled')) {
+                sendMessage();
             }
-        });
-    }
+        }
+    });
 
+    // Use a single click handler for the send button, acting as send or stop
     if (sendButton) {
-        sendButton.addEventListener('click', () => {
-            if (sendButton.classList.contains('sending-state')) {
-                sendStopStreamCommand();
+        sendButton.addEventListener('click', (event) => {
+            event.preventDefault(); // Prevent default form submission if any
+            if (sendButton.classList.contains('disabled')) {
+                return;
+            } else if (sendButton.classList.contains('sending-state')) {
+                socket.emit('commands', { command: 'stop_stream' });
             } else {
-                sendMessage(userInput.value);
+                sendMessage();
             }
         });
     }
 
-    if (clearChatButton) {
-        clearChatButton.addEventListener('click', sendClearChatCommand);
+    clearChatButton.addEventListener('click', (event) => {
+        if (clearChatButton.classList.contains('disabled')) {
+            event.preventDefault(); // Prevent action if disabled
+        } else {
+            sendClearChatCommand();
+        }
+    });
+
+    // Add event listeners for quick action buttons
+    if (quickActionButtonsContainer) {
+        const quickButtons = quickActionButtonsContainer.querySelectorAll('.quick-action-button');
+        quickButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                if (userInput.value.length > 0 && userInput.value.slice(-1) !== ' ') {
+                    userInput.value += ' ';
+                }
+                userInput.value += button.textContent;
+                autoExpandInput(userInput);
+                updateSendButtonState();
+                updatePlaceholderVisibility();
+                userInput.focus();
+            });
+        });
     }
+
+    document.getElementById('card-1').addEventListener('click', () => sendMessage(document.getElementById('card-1').querySelector('p').textContent));
+    document.getElementById('card-2').addEventListener('click', () => sendMessage(document.getElementById('card-2').querySelector('p').textContent));
+    document.getElementById('card-3').addEventListener('click', () => sendMessage(document.getElementById('card-3').querySelector('p').textContent));
+    document.getElementById('card-4').addEventListener('click', () => sendMessage(document.getElementById('card-4').querySelector('p').textContent));
 });
