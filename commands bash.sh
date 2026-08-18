@@ -12,3 +12,12 @@ sudo systemctl restart fridge-bridge
 
 # 4. View live traffic logs
 journalctl -u fridge-bridge -f
+
+# 5 changing files 
+sudo nano /etc/systemd/system/fridge-bridge.service 
+sudo systemctl daemon-reload
+sudo systemctl restart fridge-bridge
+Check the live logs to make sure your new code didn't introduce a syntax error:
+
+bash
+journalctl -u fridge-bridge -f
