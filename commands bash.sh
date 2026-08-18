@@ -15,7 +15,7 @@ journalctl -u fridge-bridge -f
 
 # 5 changing files 
 sudo nano /etc/systemd/system/fridge-bridge.service 
-nano /home/arduino/fridge_bridge_daemon.py
+sudo nano /home/arduino/fridge_bridge_daemon.py
 sudo systemctl daemon-reload
 sudo systemctl restart fridge-bridge
 Check the live logs to make sure your new code didn't introduce a syntax error:
